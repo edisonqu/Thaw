@@ -61,13 +61,15 @@ struct GeneralSettingsPane: View {
         showIceIcon
         if settings.showIceIcon {
             iceIconPicker
+            Toggle("Open launcher when clicking the icon", isOn: $settings.openLauncherOnClick)
+                .annotation("Browse and search your menu items by name. Turn this off to open the compact tray instead.")
         }
         alwaysHiddenIconGestures
     }
 
     private var showIceIcon: some View {
         Toggle("Show \(Constants.displayName) icon", isOn: $settings.showIceIcon)
-            .annotation("Show the \(Constants.displayName) icon in the menu bar. Click to show hidden items, double-click for always-hidden, and right-click for settings.")
+            .annotation("Show the \(Constants.displayName) icon in the menu bar. Click to open your menu items, or right-click for settings and the compact tray.")
     }
 
     @ViewBuilder

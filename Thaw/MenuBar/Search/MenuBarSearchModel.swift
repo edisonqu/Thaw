@@ -20,7 +20,14 @@ final class MenuBarSearchModel {
     }
 
     var searchText = ""
-    var displayedItems = [SectionedListItem<ItemID>]()
+    var displayedItems = [SectionedListItem<ItemID>]() {
+        didSet {
+            // Keep keyboard actions attached to a live, selectable result.
+            if !displayedItems.contains(where: { $0.id == selection && $0.isSelectable }) {
+                selection = displayedItems.first(where: \.isSelectable)?.id
+            }
+        }
+    }
     var selection: ItemID?
     private(set) var averageColorInfo: MenuBarAverageColorInfo?
     var editingItemTag: MenuBarItemTag?

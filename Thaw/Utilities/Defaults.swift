@@ -158,6 +158,7 @@ nonisolated extension Defaults {
         // MARK: General Settings
 
         static let showIceIcon = true
+        static let openLauncherOnClick = true
         static let iceIcon = ControlItemImageSet.defaultIceIcon
         static let customIceIconIsTemplate = false
         static let useIceBar = false
@@ -240,6 +241,7 @@ nonisolated extension Defaults {
         // MARK: General Settings
 
         case showIceIcon = "ShowIceIcon"
+        case openLauncherOnClick = "OpenLauncherOnClick"
         case iceIcon = "IceIcon"
         case customIceIconIsTemplate = "CustomIceIconIsTemplate"
         case useIceBar = "UseIceBar"

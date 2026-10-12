@@ -867,6 +867,12 @@ final class ControlItem {
                     return
                 }
 
+                if identifier == .visible, appState.settings.general.openLauncherOnClick {
+                    menuBarManager.iceBarPanel.hide()
+                    menuBarManager.searchPanel.toggle()
+                    return
+                }
+
                 if
                     let section = menuBarManager.section(withName: sectionName),
                     section.isEnabled

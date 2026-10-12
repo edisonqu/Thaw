@@ -171,6 +171,8 @@ final class MenuBarSearchPanel: NSPanel {
             backing: .buffered,
             defer: false
         )
+        self.title = String(localized: "Your menu bar")
+        self.titleVisibility = .hidden
         self.titlebarAppearsTransparent = true
         self.isMovableByWindowBackground = false
         self.animationBehavior = .none
@@ -265,6 +267,7 @@ final class MenuBarSearchPanel: NSPanel {
             appState: appState,
             model: model,
             displayID: screen.displayID,
+            availableSize: screen.visibleFrame.size,
             panel: self
         )
         hostingView.setFrameSize(hostingView.intrinsicContentSize)
@@ -429,11 +432,12 @@ private final class MenuBarSearchHostingView: NSHostingView<AnyView> {
         appState: AppState,
         model: MenuBarSearchModel,
         displayID: CGDirectDisplayID,
+        availableSize: CGSize,
         panel: MenuBarSearchPanel
     ) {
         super.init(
             rootView: AnyView(
-                MenuBarSearchContentView(model: model, displayID: displayID, panel: panel) { [weak panel] in
+                MenuBarSearchContentView(model: model, displayID: displayID, availableSize: availableSize, panel: panel) { [weak panel] in
                     panel?.close()
                 }
                 .environment(appState)
@@ -468,14 +472,24 @@ private struct MenuBarSearchContentView: View {
     // which keeps bindings available anywhere in the type.
     @Bindable var model: MenuBarSearchModel
     @FocusState private var searchFieldIsFocused: Bool
+    @State private var loadingTimedOut = false
     @AppStorage(Defaults.Key.rememberSearchQuery.rawValue) private var rememberSearchQuery = Defaults.DefaultValue.rememberSearchQuery
 
     let displayID: CGDirectDisplayID
+    let availableSize: CGSize
     let panel: MenuBarSearchPanel
     let closePanel: () -> Void
 
     private var hasItems: Bool {
         !itemManager.itemCache.managedItems.isEmpty
+    }
+
+    private var resultCount: Int {
+        model.displayedItems.count(where: \.isSelectable)
+    }
+
+    private var query: String {
+        model.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var bottomBarPadding: CGFloat {
@@ -497,13 +511,18 @@ private struct MenuBarSearchContentView: View {
             .scrollEdgeEffectStyle(.automatic, for: .vertical)
             .environment(\.menuBarSearchPanel, panel)
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .frame(width: 600, height: 400)
+            .frame(width: min(640, availableSize.width - 32), height: min(560, availableSize.height - 32))
             .fixedSize()
             .onAppear {
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(50))
                     searchFieldIsFocused = true
                 }
+            }
+            .task {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                loadingTimedOut = true
             }
             .onChange(of: model.searchText, initial: true) {
                 updateDisplayedItems()
@@ -545,6 +564,27 @@ private struct MenuBarSearchContentView: View {
         let promptText = Text("Search menu bar items…")
 
         VStack(spacing: 0) {
+            HStack {
+                Text("Your menu bar")
+                    .font(.headline)
+                Text(resultCount == 1 ? String(localized: "1 item") : String(localized: "\(resultCount) items"))
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(action: closePanel) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 26, height: 26)
+                        .background(.quaternary, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close launcher")
+                .help("Escape clears your search, then closes the launcher")
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
+
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 18))
@@ -560,9 +600,20 @@ private struct MenuBarSearchContentView: View {
                 .autocorrectionDisabled(true)
                 .focused($searchFieldIsFocused)
 
-                Spacer()
+                if !model.searchText.isEmpty {
+                    Button {
+                        model.searchText = ""
+                        searchFieldIsFocused = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                    .help("Clear search")
+                }
             }
-            .padding(15)
+            .padding(18)
 
             Divider()
                 .padding(.horizontal, 15)
@@ -596,6 +647,23 @@ private struct MenuBarSearchContentView: View {
                 .foregroundStyle(.link)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if hasItems, resultCount == 0 {
+            ContentUnavailableView {
+                Label(query.isEmpty ? String(localized: "No items included") : String(localized: "No matching items"), systemImage: "magnifyingglass")
+            } description: {
+                Text(query.isEmpty
+                    ? String(localized: "Choose which menu bar sections appear in search.")
+                    : String(localized: "Try an app name, or clear your search to browse everything."))
+            } actions: {
+                if query.isEmpty {
+                    Button("Search settings", action: openPermissionsSettings)
+                } else {
+                    Button("Clear search") {
+                        model.searchText = ""
+                        searchFieldIsFocused = true
+                    }
+                }
+            }
         } else if hasItems {
             SectionedList(
                 selection: $model.selection,
@@ -604,8 +672,23 @@ private struct MenuBarSearchContentView: View {
             )
             .contentPadding(8)
             .scrollContentBackground(.hidden)
+        } else if loadingTimedOut {
+            ContentUnavailableView {
+                Label("No menu items yet", systemImage: "menubar.rectangle")
+            } description: {
+                Text("Items appear here when your apps add them to the menu bar.")
+            } actions: {
+                Button("Refresh items") {
+                    loadingTimedOut = false
+                    Task {
+                        await itemManager.cacheItemsIfNeeded()
+                        await imageCache.updateCache()
+                        loadingTimedOut = true
+                    }
+                }
+            }
         } else {
-            VStack {
+            VStack(spacing: 12) {
                 Text("Loading menu bar items…")
                     .font(.title2)
                 ProgressView()
@@ -623,11 +706,17 @@ private struct MenuBarSearchContentView: View {
                 appState.openWindow(.settings)
             }
 
-            Toggle("Keep search", isOn: $rememberSearchQuery)
+            Toggle("Remember search", isOn: $rememberSearchQuery)
                 .toggleStyle(.switch)
                 .controlSize(.mini)
 
             Spacer()
+
+            if model.editingItemTag == nil {
+                Text("↑↓ Navigate  ·  esc Clear / close")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             if let selection = model.selection, let item = panel.menuBarItem(for: selection) {
                 if model.editingItemTag == nil {
@@ -704,6 +793,10 @@ private struct MenuBarSearchContentView: View {
                     return
                 }
 
+                let sectionItems = itemManager.itemCache.managedItems(for: name)
+                    .reversed().filter { !$0.isControlItem }
+                guard !sectionItems.isEmpty else { return }
+
                 let headerItem = ListItem.header(id: .header(name)) {
                     Text(name.localized)
                         .fontWeight(.semibold)
@@ -714,12 +807,7 @@ private struct MenuBarSearchContentView: View {
                 }
                 items.append(SearchItem(listItem: headerItem, title: name.displayString))
 
-                for item in itemManager.itemCache.managedItems(for: name)
-                    .reversed()
-                {
-                    guard !item.isControlItem else {
-                        continue
-                    }
+                for item in sectionItems {
                     let listItem = ListItem.item(id: .item(item.tag, windowID: item.windowID)) {
                         performAction(for: item)
                     } content: {
@@ -729,12 +817,12 @@ private struct MenuBarSearchContentView: View {
                 }
             }
 
-        if model.searchText.isEmpty {
+        if query.isEmpty {
             model.displayedItems = searchItems.map(\.listItem)
         } else {
             let selectableItems = searchItems.filter(\.listItem.isSelectable)
             // Using weighted search via FuseProp
-            let fuseResults = model.fuse.searchSync(model.searchText, in: selectableItems, by: \.properties)
+            let fuseResults = model.fuse.searchSync(query, in: selectableItems, by: \.properties)
 
             model.displayedItems = fuseResults
                 .map { result in
@@ -789,29 +877,10 @@ private struct EditNameButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Text(String(localized: "Edit Name"))
-                    .padding(.leading, 5)
-
-                HStack(spacing: 0) {
-                    Text(verbatim: "⌘")
-                }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .foregroundStyle(.secondary)
-
-                Text(verbatim: "+")
-
-                HStack(spacing: 0) {
-                    Text(verbatim: "E")
-                }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .foregroundStyle(.secondary)
-            }
+            Image(systemName: "pencil")
         }
+        .accessibilityLabel("Rename selected item")
+        .help("Rename selected item (⌘E)")
     }
 }
 
@@ -866,12 +935,11 @@ private struct SettingsButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(.iceCubeStroke)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+            Image(systemName: "gearshape")
                 .foregroundStyle(.secondary)
-                .padding(2)
         }
+        .accessibilityLabel("Settings")
+        .help("Settings (⌘,)")
     }
 }
 
@@ -883,9 +951,7 @@ private struct ShowItemButton: View {
         Button(action: action) {
             HStack {
                 Text(
-                    Bridging.isWindowOnScreen(item.windowID)
-                        ? String(localized: "Click Item")
-                        : String(localized: "Show Item")
+                    String(localized: "Open")
                 )
                 .padding(.leading, 5)
 
@@ -900,6 +966,8 @@ private struct ShowItemButton: View {
                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             }
         }
+        .accessibilityLabel("Open \(item.displayName)")
+        .help("Open selected item (Return)")
     }
 }
 
@@ -1057,6 +1125,7 @@ private struct MenuBarSearchItemView: View {
             itemView
         }
         .padding(padding)
+        .frame(minHeight: 44)
     }
 
     private var labelText: some View {

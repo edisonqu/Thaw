@@ -25,6 +25,14 @@ final class GeneralSettings {
         }
     }
 
+    /// Opens the named launcher when the main menu bar icon is clicked.
+    var openLauncherOnClick = Defaults.DefaultValue.openLauncherOnClick {
+        didSet {
+            guard oldValue != openLauncherOnClick else { return }
+            Defaults.set(openLauncherOnClick, forKey: .openLauncherOnClick)
+        }
+    }
+
     /// An icon to show in the menu bar, with a different image
     /// for when items are visible or hidden.
     var iceIcon = Defaults.DefaultValue.iceIcon {
@@ -193,6 +201,7 @@ final class GeneralSettings {
     /// Loads the model's initial state.
     private func loadInitialState() {
         Defaults.ifPresent(key: .showIceIcon, assign: &showIceIcon)
+        Defaults.ifPresent(key: .openLauncherOnClick, assign: &openLauncherOnClick)
         Defaults.ifPresent(key: .customIceIconIsTemplate, assign: &customIceIconIsTemplate)
         Defaults.ifPresent(key: .useIceBar, assign: &useIceBar)
         Defaults.ifPresent(key: .useIceBarOnlyOnNotchedDisplay, assign: &useIceBarOnlyOnNotchedDisplay)
